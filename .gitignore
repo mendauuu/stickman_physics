@@ -1,2 +1,45 @@
 /APPLY_FIXES.ps1
 /fix_gradle.ps1
+
+# Signing secrets — never commit
+*.jks
+*.keystore
+android/key.properties
+
+# Flutter / Dart build output
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+/build/
+build/
+
+# Android build files and machine-specific config
+android/.gradle/
+android/.kotlin/
+android/app/build/
+android/local.properties
+android/captures/
+android/**/GeneratedPluginRegistrant.java
+*.iml
+
+# JVM crash logs
+hs_err_pid*.log
+replay_pid*.log
+
+# iOS generated files
+ios/Flutter/Generated.xcconfig
+ios/Flutter/ephemeral/
+ios/Flutter/flutter_export_environment.sh
+ios/Runner/GeneratedPluginRegistrant.*
+ios/Pods/
+ios/.symlinks/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.log
