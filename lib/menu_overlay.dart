@@ -1,9 +1,10 @@
 part of 'main.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
-// MAIN MENU — title + selected floor on the left, the university building
-// (one row per floor, B at the bottom) on the right. Floors unlock as the
-// student reaches them and can be picked to start a run from there.
+// MAIN MENU — title, characters and the selected room on the left; the map
+// of the Nightmare University (floors 1 → 6, one per hour, and their rooms)
+// on the right. Rooms unlock as Ozod reaches them and can be picked to start
+// a run from there.
 // ═══════════════════════════════════════════════════════════════════════════
 class _MenuOverlay extends StatefulWidget {
   final SchoolGame game;
@@ -19,14 +20,13 @@ class _MenuOverlayState extends State<_MenuOverlay> with SingleTickerProviderSta
   )..repeat(reverse: true);
 
   String? _lockedHint;
-  final _floorKeys = List.generate(kFloors.length, (_) => GlobalKey());
-  int _scrolledTo = -1;
+  String? _tab; // floor shown on the map; follows the selection by default
   final _heroScroll = ScrollController();
   int _heroScrolledTo = -1;
 
   SchoolGame get _g => widget.game;
   int get _selected => _g.menuFloor.value;
-  bool get _graduated => _g.bestFloor >= kFloors.length;
+  bool get _graduated => _g.bestFloor >= kRooms.length;
 
   @override
   void dispose() {
@@ -36,21 +36,41 @@ class _MenuOverlayState extends State<_MenuOverlay> with SingleTickerProviderSta
   }
 
   void _select(int i) {
+    GameAudio.instance.play('click');
     if (!_g.isUnlocked(i)) {
-      final prev = kFloors[i - 1];
-      setState(() => _lockedHint = '🔒 Beat ${prev.name} (floor ${prev.floorLabel}) to unlock');
+      final prev = kRooms[i - 1];
+      setState(() => _lockedHint = '🔒 Clear ${prev.label} · ${prev.name} first');
       return;
     }
-    setState(() => _lockedHint = null);
+    setState(() {
+      _lockedHint = null;
+      _tab = kRooms[i].building;
+    });
     _g.previewFloor(i);
   }
 
+  void _selectBuilding(BuildingDef b) {
+    final first = kRooms.indexWhere((r) => r.building == b.letter);
+    if (!_g.isUnlocked(first)) {
+      final prev = kBuildings[kBuildings.indexOf(b) - 1];
+      setState(() => _lockedHint = '🔒 Finish ${prev.title} to climb to ${b.title}');
+      return;
+    }
+    // Jump to the furthest unlocked room on that floor.
+    var target = first;
+    for (var i = first; i < kRooms.length && kRooms[i].building == b.letter; i++) {
+      if (_g.isUnlocked(i)) target = i;
+    }
+    _select(target);
+  }
+
   void _selectHero(int i) {
+    GameAudio.instance.play('click');
     final h = kHeroes[i];
     if (!_g.isHeroUnlocked(i)) {
       setState(() => _lockedHint = h.unlockFloor >= kFloors.length
-          ? '🔒 Graduate (beat all ${kFloors.length} floors) to unlock the ${h.name}'
-          : '🔒 Reach floor ${kFloors[h.unlockFloor].floorLabel} to unlock the ${h.name}');
+          ? '🔒 Wake up (beat the Grade Reaper) to unlock the ${h.name}'
+          : '🔒 Beat ${h.unlockFloor} bosses to unlock the ${h.name} (${_g.bossesCleared}/${h.unlockFloor})');
       return;
     }
     _g.selectHero(i);
@@ -72,23 +92,9 @@ class _MenuOverlayState extends State<_MenuOverlay> with SingleTickerProviderSta
     });
   }
 
-  /// Keeps the selected floor visible in the scrolling building.
-  void _scrollToSelected() {
-    if (_scrolledTo == _selected) return;
-    final first = _scrolledTo == -1;
-    _scrolledTo = _selected;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final ctx = _floorKeys[_selected].currentContext;
-      if (ctx != null && ctx.mounted) {
-        Scrollable.ensureVisible(ctx,
-            alignment: 0.5, duration: first ? Duration.zero : const Duration(milliseconds: 250));
-      }
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
-    // Rebuilds when a floor is picked and once saved progress has loaded.
+    // Rebuilds when a room is picked and once saved progress has loaded.
     return ValueListenableBuilder<int>(
       valueListenable: _g.menuFloor,
       builder: (context, _, __) => _layout(),
@@ -98,37 +104,49 @@ class _MenuOverlayState extends State<_MenuOverlay> with SingleTickerProviderSta
   Widget _layout() {
     return LayoutBuilder(builder: (context, box) {
       final compact = box.maxHeight < 360;
-      return Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xF5070D1A), Color(0xC0070D1A), Color(0x30070D1A), Color(0xD0070D1A)],
-            stops: [0, 0.38, 0.6, 0.78],
-          ),
-        ),
-        child: SafeArea(
+      final leftW = min(340.0, box.maxWidth * 0.43), rightW = min(262.0, box.maxWidth * 0.32);
+      return Stack(children: [
+        // Hard-edged shade behind the two columns; the live room shows in the middle.
+        Positioned(left: 0, top: 0, bottom: 0, width: leftW + 34, child: Container(color: kInk.withValues(alpha: 0.72))),
+        Positioned(right: 0, top: 0, bottom: 0, width: rightW + 24, child: Container(color: kInk.withValues(alpha: 0.6))),
+        SafeArea(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 10, 14, 10),
+            padding: const EdgeInsets.fromLTRB(18, 8, 12, 8),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                SizedBox(width: min(330.0, box.maxWidth * 0.42), child: _leftPanel(compact)),
+                SizedBox(width: leftW, child: _leftPanel(compact)),
                 const Spacer(),
-                SizedBox(width: min(250.0, box.maxWidth * 0.3), child: _building()),
+                SizedBox(width: rightW, child: _campus(compact)),
               ],
             ),
           ),
         ),
-      );
+      ]);
     });
   }
 
-  // ── Left: title, selected floor, play ─────────────────────────────────────
+  // ── Left: title, characters, selected room, play ─────────────────────────
   Widget _leftPanel(bool compact) {
     _scrollToHero();
-    final d = kFloors[_selected];
+    final r = kRooms[_selected];
+    final d = r.def;
     final cleared = _g.isCleared(_selected) || _graduated;
-    final floorsDone = _graduated ? kFloors.length : _g.bestFloor;
+    final roomsDone = _graduated ? kRooms.length : _g.bestFloor;
     final shown = compact ? 3 : 4;
+    final chips = switch (r.kind) {
+      RoomKind.boss => [for (final a in d.allAbilities) d.abilityName(a)],
+      RoomKind.hall => {
+          for (final w in r.waves)
+            for (final m in w) '${kMinions[m]!.emoji} ${kMinions[m]!.name}'
+        }.toList(),
+      RoomKind.rest => ['👻 Mira', '❤️ Full heal', if (r.gift) '📄 Her Lost Note'],
+    };
+    final subtitle = switch (r.kind) {
+      RoomKind.boss => '${d.course}  ·  ${d.rounds} ${d.rounds == 2 ? 'rounds' : 'phases'}',
+      RoomKind.hall => 'Monster hall  ·  ${r.waves.length} waves',
+      RoomKind.rest => "Mira's corner  ·  full heal",
+    };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -140,32 +158,38 @@ class _MenuOverlayState extends State<_MenuOverlay> with SingleTickerProviderSta
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('MILLAT UMIDI UNIVERSITY',
-                      style: TextStyle(
-                          color: Colors.white60, fontSize: 11, letterSpacing: 4, fontWeight: FontWeight.w800)),
+                  Row(children: [
+                    const PixelIcon('clock', size: 16),
+                    const SizedBox(width: 6),
+                    Text('THE SAGA OF THE LAST NIGHT', style: pixelStyle(8, Colors.white60, spacing: 1)),
+                  ]),
+                  const SizedBox(height: 6),
+                  // The title blinks between two colours in hard steps, like an arcade marquee.
                   AnimatedBuilder(
                     animation: _pulse,
-                    builder: (_, __) => Text('CLASS CLASH',
-                        style: TextStyle(
-                          color: _cyan,
-                          fontSize: compact ? 30 : 40,
-                          height: 1.05,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 3,
-                          shadows: [Shadow(color: _cyan.withValues(alpha: 0.4 + _pulse.value * 0.4), blurRadius: 22)],
-                        )),
+                    builder: (_, __) => FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text('EXAM ESCAPE',
+                          style: pixelStyle(compact ? 26 : 32, _pulse.value > 0.5 ? _cyan : Colors.white, spacing: 1)
+                              .copyWith(shadows: [
+                            Shadow(color: const Color(0xFFFF1744), offset: Offset(compact ? 3 : 4, compact ? 3 : 4)),
+                            Shadow(color: kInk, offset: Offset(compact ? 6 : 8, compact ? 6 : 8)),
+                          ])),
+                    ),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 8),
                   Wrap(spacing: 6, runSpacing: 4, children: [
-                    _statPill('🏢', '$floorsDone/${kFloors.length} floors passed'),
+                    _statPill('scroll', '$roomsDone/${kRooms.length} rooms'),
+                    _statPill('skull', '${_g.bossesCleared}/${kFloors.length} bosses'),
                     if (_graduated)
-                      _statPill('🎓', _g.bestTime != null ? 'best ${_fmtTime(_g.bestTime!)}' : 'graduated'),
+                      _statPill('sun', _g.bestTime != null ? 'best ${_fmtTime(_g.bestTime!)}' : 'woke up'),
                   ]),
                   SizedBox(height: compact ? 6 : 10),
 
-                  // Character picker (scrolls sideways: more students than fit)
+                  // Character picker (scrolls sideways: more characters than fit)
                   SizedBox(
-                    height: 38,
+                    height: 40,
                     child: ListView.separated(
                       controller: _heroScroll,
                       scrollDirection: Axis.horizontal,
@@ -185,70 +209,57 @@ class _MenuOverlayState extends State<_MenuOverlay> with SingleTickerProviderSta
                   if (!compact) ...[
                     const SizedBox(height: 4),
                     Text('${_g.hero.title} · ${_g.hero.desc}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Colors.white54, fontSize: 10)),
+                        maxLines: 1, overflow: TextOverflow.ellipsis, style: bodyStyle(16, Colors.white54, shadow: false)),
                   ],
-                  SizedBox(height: compact ? 6 : 10),
+                  SizedBox(height: compact ? 6 : 8),
 
-                  // Selected floor card
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 250),
-                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                    decoration: BoxDecoration(
-                      color: const Color(0xE6101827),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: d.accent.withValues(alpha: 0.8), width: 1.5),
-                      boxShadow: [BoxShadow(color: d.accent.withValues(alpha: 0.25), blurRadius: 18)],
-                    ),
+                  // Selected room card
+                  PixelPanel(
+                    color: _panel,
+                    accent: d.accent,
+                    px: 2,
+                    padding: const EdgeInsets.fromLTRB(6, 4, 6, 4),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(children: [
                           Expanded(
-                            child: Text('FLOOR ${d.floorLabel} · ${d.floorName}',
-                                style: TextStyle(
-                                    color: d.accent, fontSize: 10, letterSpacing: 2, fontWeight: FontWeight.w900)),
+                            child: Text('${r.buildingDef.title.toUpperCase()} · ${clockText(r.minutes)} · ${r.label}',
+                                maxLines: 1, overflow: TextOverflow.ellipsis, style: pixelStyle(7, d.accent)),
                           ),
-                          if (cleared)
-                            const Text('✓ PASSED',
-                                style: TextStyle(color: Color(0xFF00E676), fontSize: 10, fontWeight: FontWeight.w900)),
+                          if (cleared) ...[
+                            const PixelIcon('ui_check', size: 9),
+                            const SizedBox(width: 4),
+                            Text('CLEARED', style: pixelStyle(7, const Color(0xFF00E676))),
+                          ],
                         ]),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 6),
                         Row(children: [
-                          Text(d.emoji, style: TextStyle(fontSize: compact ? 26 : 32)),
+                          PText(r.emoji, style: pixelStyle(compact ? 20 : 24, Colors.white)),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              Text(d.name,
+                              PText(r.isBoss ? d.name : r.name,
+                                  maxLines: 1, overflow: TextOverflow.ellipsis, style: pixelStyle(12, Colors.white)),
+                              const SizedBox(height: 2),
+                              Text(subtitle,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style:
-                                      const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900)),
-                              Text('${d.course}  ·  2 rounds',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(color: Colors.white54, fontSize: 10, letterSpacing: 1)),
+                                  style: bodyStyle(15, Colors.white54, shadow: false)),
                             ]),
                           ),
                         ]),
                         if (!compact) const SizedBox(height: 6),
                         if (!compact)
                           Wrap(spacing: 4, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
-                            for (final a in d.abilities.take(shown))
+                            for (final c in chips.take(shown))
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: d.accent.withValues(alpha: 0.14),
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: Text(kAbilityName[a]!,
-                                    style: const TextStyle(
-                                        color: Colors.white, fontSize: 9.5, fontWeight: FontWeight.w700)),
+                                padding: const EdgeInsets.fromLTRB(5, 3, 5, 2),
+                                color: Color.lerp(_panel, d.accent, 0.18),
+                                child: PText(c, style: pixelStyle(7, Colors.white, shadow: false)),
                               ),
-                            if (d.abilities.length > shown)
-                              Text('+${d.abilities.length - shown} more',
-                                  style: const TextStyle(color: Colors.white38, fontSize: 9.5)),
+                            if (chips.length > shown)
+                              Text('+${chips.length - shown} more', style: pixelStyle(7, Colors.white38, shadow: false)),
                           ]),
                       ],
                     ),
@@ -258,140 +269,156 @@ class _MenuOverlayState extends State<_MenuOverlay> with SingleTickerProviderSta
             ),
           ),
         ),
-        SizedBox(height: compact ? 8 : 12),
+        SizedBox(height: compact ? 6 : 10),
         _BigButton(
-          label: _selected == 0 ? 'START  ▶' : 'PLAY FLOOR ${d.floorLabel}  ▶',
+          label: _selected == 0 ? 'START  ▶' : 'PLAY ${r.label}  ▶',
           color: d.accent,
           small: true,
           wide: true,
           onTap: () => _g.startRun(fromFloor: _selected),
         ),
-        const SizedBox(height: 8),
-        AnimatedSwitcher(
-          duration: const Duration(milliseconds: 200),
-          child: Text(
-            _lockedHint ??
-                (_selected == 0
-                    ? 'Climb all ${kFloors.length} floors to graduate!'
-                    : 'Best time only counts when you start from the basement'),
-            key: ValueKey(_lockedHint ?? 'floor$_selected'),
-            style: TextStyle(color: _lockedHint != null ? const Color(0xFFFF8A80) : Colors.white38, fontSize: 10.5),
-          ),
+        const SizedBox(height: 6),
+        Text(
+          _lockedHint ??
+              (_selected == 0
+                  ? 'Six floors. Six hours. Wake up before 9:00 AM.'
+                  : 'Best time only counts when you start from 1-1'),
+          key: ValueKey(_lockedHint ?? 'room$_selected'),
+          maxLines: 2,
+          style: bodyStyle(16, _lockedHint != null ? const Color(0xFFFF8A80) : Colors.white38, shadow: false),
         ),
       ],
     );
   }
 
   Widget _statPill(String icon, String text) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Text('$icon $text', style: const TextStyle(color: _gold, fontSize: 11, fontWeight: FontWeight.w700)),
+        padding: const EdgeInsets.fromLTRB(5, 3, 7, 3),
+        color: Colors.white.withValues(alpha: 0.08),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          PixelIcon(icon, size: 13),
+          const SizedBox(width: 5),
+          Text(text, style: pixelStyle(8, _gold)),
+        ]),
       );
 
-  // ── Right: the university building, one row per floor ─────────────────────
-  Widget _building() {
-    _scrollToSelected();
-    const rowH = 40.0, gap = 4.0;
-    final rows = <Widget>[];
-    // ListView(reverse: true) lays children bottom-up, so B sits at the bottom.
-    for (var i = 0; i < kFloors.length; i++) {
-      rows.add(Padding(
-        key: _floorKeys[i],
-        padding: const EdgeInsets.only(bottom: gap),
-        child: _FloorRow(
-          def: kFloors[i],
-          height: rowH,
-          unlocked: _g.isUnlocked(i),
-          cleared: _g.isCleared(i) || _graduated,
-          isNew: i == _g.bestFloor && !_graduated && i > 0,
-          selected: i == _selected,
-          onTap: () => _select(i),
-        ),
-      ));
-      if (i == 0) rows.add(_street(14));
-    }
+  // ── Right: the map — floor tabs and that floor's rooms ──────────────────
+  Widget _campus(bool compact) {
+    final shown = _tab ?? kRooms[_selected].building;
+    final b = kBuildings.firstWhere((x) => x.letter == shown);
+    final ids = [
+      for (var i = 0; i < kRooms.length; i++)
+        if (kRooms[i].building == shown) i
+    ];
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _roof(30),
-        Expanded(
-          child: ShaderMask(
-            // Fade rows out at the top edge to hint that the building scrolls.
-            shaderCallback: (r) => const LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Colors.transparent, Colors.white, Colors.white],
-              stops: [0, 0.06, 1],
-            ).createShader(r),
-            blendMode: BlendMode.dstIn,
-            child: ListView(
-              reverse: true,
-              padding: const EdgeInsets.only(top: 6),
-              children: rows,
+        Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            const PixelIcon('scroll', size: 14),
+            const SizedBox(width: 6),
+            Text('NIGHTMARE UNIVERSITY', style: pixelStyle(8, Colors.white70, spacing: 1)),
+          ]),
+        ),
+        // Floor tabs, bottom to top
+        Row(children: [
+          for (var k = 0; k < kBuildings.length; k++)
+            Expanded(
+              child: _BuildingTab(
+                b: kBuildings[k],
+                selected: kBuildings[k].letter == shown,
+                unlocked: _g.isUnlocked(kRooms.indexWhere((r) => r.building == kBuildings[k].letter)),
+                done: _buildingDone(kBuildings[k]),
+                onTap: () => _selectBuilding(kBuildings[k]),
+              ),
             ),
-          ),
+        ]),
+        SizedBox(height: compact ? 6 : 8),
+        PText('${b.emoji} ${b.time} · ${b.name.toUpperCase()}',
+            textAlign: TextAlign.center, maxLines: 1, style: pixelStyle(7, b.color)),
+        SizedBox(height: compact ? 4 : 6),
+        Expanded(
+          child: LayoutBuilder(builder: (context, box) {
+            final rowH = ((box.maxHeight - (ids.length - 1) * 4) / ids.length).clamp(30.0, 46.0);
+            return ListView.separated(
+              padding: EdgeInsets.zero,
+              itemCount: ids.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 4),
+              itemBuilder: (_, j) {
+                final i = ids[j];
+                return _RoomRow(
+                  room: kRooms[i],
+                  height: rowH,
+                  unlocked: _g.isUnlocked(i),
+                  cleared: _g.isCleared(i) || _graduated,
+                  isNew: i == _g.bestFloor && !_graduated && i > 0,
+                  selected: i == _selected,
+                  onTap: () => _select(i),
+                );
+              },
+            );
+          }),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text('Art: Ozzbit · Craftpix · BlackSkull-k · 0-mem0ry',
+              textAlign: TextAlign.center, maxLines: 1, style: bodyStyle(13, Colors.white24, shadow: false)),
         ),
       ],
     );
   }
 
-  Widget _roof(double h) => SizedBox(
-        height: h,
-        child: CustomPaint(
-          painter: _RoofPainter(),
-          child: const Center(
-            child: Padding(
-              padding: EdgeInsets.only(top: 4),
-              child: Text('🎓 MILLAT UMIDI',
-                  style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 2)),
-            ),
-          ),
-        ),
-      );
-
-  Widget _street(double h) => Container(
-        height: h,
-        margin: const EdgeInsets.only(bottom: 4),
-        alignment: Alignment.center,
-        decoration: const BoxDecoration(
-          border: Border(top: BorderSide(color: Color(0xFF66BB6A), width: 2)),
-        ),
-        child: const Text('STREET LEVEL', style: TextStyle(color: Colors.white30, fontSize: 7, letterSpacing: 3)),
-      );
-}
-
-class _RoofPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final path = Path()
-      ..moveTo(0, size.height - 2)
-      ..lineTo(size.width * 0.12, 2)
-      ..lineTo(size.width * 0.88, 2)
-      ..lineTo(size.width, size.height - 2)
-      ..close();
-    canvas.drawPath(path, Paint()..color = const Color(0xFF8D2C2C));
-    canvas.drawPath(
-        path,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.5
-          ..color = _gold.withValues(alpha: 0.6));
+  bool _buildingDone(BuildingDef b) {
+    final last = kRooms.lastIndexWhere((r) => r.building == b.letter);
+    return _g.isCleared(last) || _graduated;
   }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-class _FloorRow extends StatelessWidget {
-  final TeacherDef def;
+class _BuildingTab extends StatelessWidget {
+  final BuildingDef b;
+  final bool selected, unlocked, done;
+  final VoidCallback onTap;
+  const _BuildingTab(
+      {required this.b, required this.selected, required this.unlocked, required this.done, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 1),
+        child: Container(
+          height: 42,
+          decoration: BoxDecoration(
+            color: selected ? Color.lerp(_panel, b.color, 0.3) : _panel,
+            border: Border.all(color: selected ? b.color : (unlocked ? b.color.withValues(alpha: 0.4) : kInk), width: 2),
+          ),
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            unlocked
+                ? Text(b.letter, style: pixelStyle(13, b.color, height: 1))
+                : const PixelIcon('lock', size: 14),
+            const SizedBox(height: 3),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(done ? 'DONE' : '${b.hour} AM',
+                  maxLines: 1,
+                  style: pixelStyle(6, done ? const Color(0xFF00E676) : Colors.white38, shadow: false, height: 1)),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+class _RoomRow extends StatelessWidget {
+  final RoomDef room;
   final double height;
   final bool unlocked, cleared, isNew, selected;
   final VoidCallback onTap;
 
-  const _FloorRow({
-    required this.def,
+  const _RoomRow({
+    required this.room,
     required this.height,
     required this.unlocked,
     required this.cleared,
@@ -402,64 +429,59 @@ class _FloorRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final def = room.def;
     final tall = height >= 38;
+    final kindColor = switch (room.kind) {
+      RoomKind.boss => def.accent,
+      RoomKind.hall => const Color(0xFFFF8A65),
+      RoomKind.rest => const Color(0xFF69F0AE),
+    };
     return GestureDetector(
       onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
+      child: Container(
         height: height,
-        padding: const EdgeInsets.symmetric(horizontal: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 5),
         decoration: BoxDecoration(
-          color: unlocked ? Color.lerp(def.wall, Colors.black, selected ? 0 : 0.3) : const Color(0xFF151A23),
-          borderRadius: BorderRadius.circular(8),
+          color: unlocked ? Color.lerp(def.wall, kInk, selected ? 0 : 0.35) : const Color(0xFF12161E),
           border: Border.all(
-            color: selected ? def.accent : (unlocked ? def.accent.withValues(alpha: 0.25) : Colors.white10),
-            width: selected ? 2 : 1,
+            color: selected ? def.accent : (unlocked ? def.accent.withValues(alpha: 0.3) : kInk),
+            width: selected ? 3 : 2,
           ),
-          boxShadow: selected ? [BoxShadow(color: def.accent.withValues(alpha: 0.5), blurRadius: 14)] : null,
         ),
         child: Row(children: [
-          // floor number plate
+          // room label plate
           Container(
-            width: 24,
-            height: 24,
+            width: 30,
+            height: 20,
             alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: unlocked ? def.accent : Colors.white12,
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Text(def.floorLabel,
-                style: TextStyle(
-                    color: unlocked ? Colors.black : Colors.white38, fontSize: 13, fontWeight: FontWeight.w900)),
+            color: unlocked ? kindColor : Colors.white12,
+            child: Text(room.label, style: pixelStyle(7, unlocked ? kInk : Colors.white38, shadow: false, height: 1)),
           ),
-          const SizedBox(width: 8),
-          Text(unlocked ? def.emoji : '🔒', style: TextStyle(fontSize: tall ? 18 : 14)),
+          const SizedBox(width: 6),
+          unlocked ? PText(room.emoji, style: pixelStyle(tall ? 14 : 11, Colors.white)) : const PixelIcon('lock', size: 16),
           const SizedBox(width: 6),
           Expanded(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(unlocked ? def.subject : 'LOCKED',
+                Text(unlocked ? (room.isBoss ? def.subject : room.name.toUpperCase()) : 'LOCKED',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        color: unlocked ? Colors.white : Colors.white30, fontSize: 11, fontWeight: FontWeight.w900)),
+                    style: pixelStyle(7, unlocked ? Colors.white : Colors.white30, height: 1.2)),
                 if (tall)
-                  Text(unlocked ? def.name : '???',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white54, fontSize: 9.5)),
+                  Text(unlocked ? room.subtitle : '???',
+                      maxLines: 1, overflow: TextOverflow.ellipsis, style: bodyStyle(14, Colors.white54, shadow: false)),
               ],
             ),
           ),
           if (cleared)
-            const Icon(Icons.check_circle, color: Color(0xFF00E676), size: 16)
+            const PixelIcon('ui_check', size: 10)
           else if (isNew)
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-              decoration: BoxDecoration(color: _gold, borderRadius: BorderRadius.circular(6)),
-              child: const Text('NEW', style: TextStyle(color: Colors.black, fontSize: 8, fontWeight: FontWeight.w900)),
+              padding: const EdgeInsets.fromLTRB(4, 3, 4, 2),
+              color: _gold,
+              child: Text('NEW', style: pixelStyle(6, kInk, shadow: false, height: 1)),
             ),
         ]),
       ),
@@ -478,38 +500,35 @@ class _HeroChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        height: 38,
-        padding: const EdgeInsets.symmetric(horizontal: 6),
+      child: Container(
+        height: 40,
+        padding: const EdgeInsets.symmetric(horizontal: 5),
         decoration: BoxDecoration(
-          color: selected ? hero.color.withValues(alpha: 0.18) : const Color(0xCC101827),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: selected ? hero.color : (unlocked ? Colors.white24 : Colors.white10),
-            width: selected ? 2 : 1,
-          ),
+          color: selected ? Color.lerp(_panel, hero.color, 0.25) : _panel,
+          border: Border.all(color: selected ? hero.color : (unlocked ? Colors.white24 : kInk), width: selected ? 3 : 2),
         ),
         child: Row(children: [
-          Text(unlocked ? hero.emoji : '🔒', style: const TextStyle(fontSize: 15)),
-          const SizedBox(width: 5),
+          unlocked ? PText(hero.emoji, style: pixelStyle(11, Colors.white)) : const PixelIcon('lock', size: 14),
+          const SizedBox(width: 4),
           Expanded(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(hero.name.toUpperCase(),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        color: unlocked ? Colors.white : Colors.white38, fontSize: 10, fontWeight: FontWeight.w900)),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(hero.name.toUpperCase(),
+                      maxLines: 1, style: pixelStyle(7, unlocked ? Colors.white : Colors.white38, height: 1.2)),
+                ),
                 Text(
                     unlocked
                         ? '${hero.hp} HP'
                         : hero.unlockFloor >= kFloors.length
-                            ? 'Graduate'
-                            : 'Floor ${kFloors[hero.unlockFloor].floorLabel}',
-                    maxLines: 1, style: TextStyle(color: unlocked ? hero.color : Colors.white30, fontSize: 8.5)),
+                            ? 'Wake up'
+                            : 'Beat ${hero.unlockFloor} bosses',
+                    maxLines: 1,
+                    style: bodyStyle(13, unlocked ? hero.color : Colors.white30, shadow: false)),
               ],
             ),
           ),

@@ -2,9 +2,12 @@
 // Sprite-sheet animation helpers for the character sheets.
 
 import 'dart:math' show pi, cos, sin, max;
+import 'dart:typed_data' show Float64List;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+
+import '../pixel/pixel_art.dart';
 
 /// Frame layout of a sprite sheet: frame size, the point on the character's
 /// feet, and how tall the visible character is (all in sprite pixels).
@@ -31,6 +34,9 @@ class SpriteAnim {
 
   double get duration => frames / fps;
 
+  /// Size of one buffer pixel in world units (0 = no snapping).
+  static double snap = 0;
+
   int frameAt(double t) {
     final f = (t * fps).floor();
     return loop ? f % frames : f.clamp(0, frames - 1);
@@ -44,6 +50,11 @@ class SpriteAnim {
       {bool flip = false, Paint? paint}) {
     final f = frameAt(t);
     final scale = height / geom.bodyPx;
+    // Stand on whole pixels of the low-res buffer, so sprites don't shimmer.
+    if (snap > 0) {
+      x = (x / snap).roundToDouble() * snap;
+      y = (y / snap).roundToDouble() * snap;
+    }
     c.save();
     c.translate(x, y);
     c.scale(flip ? -scale : scale, scale);
@@ -96,25 +107,35 @@ Map<String, SpriteAnim> buildAnims(
   };
 }
 
-/// Small cache so canvas text is laid out once, not every frame.
+//// A text draw that waits for the crisp pass (see [TextCache.defer]).
+class TextOp {
+  final Float64List transform;
+  final void Function(Canvas c) paint;
+  TextOp(this.transform, this.paint);
+}
+
+/// Canvas text in the pixel font, laid out once and cached. Emoji in the
+/// text are drawn as pixel sprites.
+///
+/// The world is drawn into a low-resolution buffer so everything shares one
+/// pixel grid; text would turn to mush there, so while [defer] is set text
+/// draws are recorded (with the canvas transform at that moment) and painted
+/// later at full resolution by [replay].
 class TextCache {
   final _cache = <String, TextPainter>{};
+  List<TextOp>? defer;
 
   TextPainter get(String text, double size, Color color,
-      {FontWeight weight = FontWeight.w900, double maxWidth = double.infinity}) {
-    final key = '$text|$size|${color.toARGB32()}|${weight.index}|$maxWidth';
+      {FontWeight weight = FontWeight.w400, double maxWidth = double.infinity}) {
+    final key = '$text|$size|${color.toARGB32()}|$maxWidth';
     if (_cache.length > 600) _cache.clear();
     return _cache.putIfAbsent(
       key,
       () => TextPainter(
         text: TextSpan(
-          text: text,
-          style: TextStyle(
-            fontSize: size,
-            color: color,
-            fontWeight: weight,
-            height: 1.0,
-          ),
+          // Icons take about two letters of room.
+          text: [for (final p in textPieces(text)) p.text ?? '  '].join(),
+          style: TextStyle(fontFamily: kPixelFont, fontSize: size, color: color, height: 1.0),
         ),
         textAlign: TextAlign.center,
         textDirection: TextDirection.ltr,
@@ -122,15 +143,78 @@ class TextCache {
     );
   }
 
+  /// Paints a laid-out [tp] at [offset] (deferred like [draw]).
+  void paint(Canvas c, TextPainter tp, Offset offset) {
+    final sink = defer;
+    if (sink == null) {
+      tp.paint(c, offset);
+    } else {
+      sink.add(TextOp(c.getTransform(), (cc) => tp.paint(cc, offset)));
+    }
+  }
+
   /// Draws [text] centred on ([x], [y]). [alpha] is quantised to keep the
-  /// cache small.
-  void draw(Canvas c, String text, double x, double y, double size,
-      Color color,
-      {double alpha = 1, FontWeight weight = FontWeight.w900, bool left = false}) {
+  /// cache small. A lone icon is drawn straight into the pixel buffer.
+  void draw(Canvas c, String text, double x, double y, double size, Color color,
+      {double alpha = 1, FontWeight weight = FontWeight.w400, bool left = false}) {
     final a = (alpha.clamp(0.0, 1.0) * 10).round() / 10;
     if (a <= 0) return;
-    final tp = get(text, size, color.withValues(alpha: color.a * a),
-        weight: weight);
-    tp.paint(c, Offset(left ? x : x - tp.width / 2, y - tp.height / 2));
+    final pieces = textPieces(text);
+    if (pieces.length == 1 && pieces.first.icon != null) {
+      final h = size * 1.15;
+      final name = pieces.first.icon!;
+      final w = PixelArt.widthAt(name, h);
+      PixelArt.drawIcon(c, name, Offset(left ? x + w / 2 : x, y), h, paint: _alphaPaint(a));
+      return;
+    }
+    final sink = defer;
+    if (sink == null) {
+      _drawNow(c, pieces, x, y, size, color, a, left);
+    } else {
+      sink.add(TextOp(c.getTransform(), (cc) => _drawNow(cc, pieces, x, y, size, color, a, left)));
+    }
+  }
+
+  /// Paints the recorded text ops; [scale] maps buffer pixels to the screen.
+  void replay(Canvas c, List<TextOp> ops, double scale) {
+    for (final op in ops) {
+      c.save();
+      c.scale(scale);
+      c.transform(op.transform);
+      op.paint(c);
+      c.restore();
+    }
+  }
+
+  static final _alphaPaints = <double, Paint>{};
+  Paint _alphaPaint(double a) => _alphaPaints.putIfAbsent(
+      a,
+      () => Paint()
+        ..filterQuality = FilterQuality.none
+        ..color = Colors.white.withValues(alpha: a));
+
+  void _drawNow(Canvas c, List<TextPiece> pieces, double x, double y, double size, Color color, double a, bool left) {
+    final col = color.withValues(alpha: color.a * a);
+    if (pieces.every((p) => p.text != null)) {
+      final tp = get(pieces.map((p) => p.text).join(), size, col);
+      tp.paint(c, Offset(left ? x : x - tp.width / 2, y - tp.height / 2));
+      return;
+    }
+    // Text and icons in a row.
+    final ih = size * 1.4;
+    final widths = [
+      for (final p in pieces) p.icon != null ? PixelArt.widthAt(p.icon!, ih) + size * 0.3 : get(p.text!, size, col).width
+    ];
+    var cx = left ? x : x - widths.fold(0.0, (s, w) => s + w) / 2;
+    for (var i = 0; i < pieces.length; i++) {
+      final p = pieces[i];
+      if (p.icon != null) {
+        PixelArt.drawIcon(c, p.icon!, Offset(cx + widths[i] / 2, y), ih, paint: _alphaPaint(a));
+      } else {
+        final tp = get(p.text!, size, col);
+        tp.paint(c, Offset(cx, y - tp.height / 2));
+      }
+      cx += widths[i];
+    }
   }
 }

@@ -62,12 +62,22 @@ class Teacher {
   double teleportCd = 0;
   double dash = 0; // charge attack time left
   double dashDir = 0;
+  double dashSpeed = 150;
+  double dashStartX = 0;
+  double pendingSlash = 0; // shadow-teleport slash lands when this hits 0
+  double size = 1; // the Reaper shrinks as you face your fear
+  int echo = -1; // boss whose shadow casts the current ability (index into kFloors)
+
+  // Deadline Twins: which one is on stage, and how much stronger each has grown.
+  int twin = 0;
+  final twinPower = [0.0, 0.0];
+  double twinSwap = 7;
 
   Teacher(this.def, this.x, this.y)
       : hp = def.hp.toDouble(),
         maxHp = def.hp.toDouble();
 
-  double get s => def.scale;
+  double get s => def.scale * size;
   Rect get rect => Rect.fromLTWH(x - 6 * s, y - 22 * s, 12 * s, 22 * s);
   double get chestY => y - 13 * s;
 
@@ -148,24 +158,27 @@ class Hazard {
   Rect get rect => Rect.fromLTWH(x - w / 2, y - h, w, h);
 }
 
-enum PickupKind { plov, somsa, coffee }
+enum PickupKind { plov, somsa, coffee, note }
 
 class Pickup {
   final PickupKind kind;
   double x, y, vy = 0;
   double life = 12;
   double t = 0;
+  int note = -1; // Lost Note index (kind == note)
   Pickup(this.kind, this.x, this.y);
 
   String get emoji => switch (kind) {
         PickupKind.plov => '🍲',
         PickupKind.somsa => '🥟',
         PickupKind.coffee => '☕',
+        PickupKind.note => '📄',
       };
   String get label => switch (kind) {
         PickupKind.plov => 'PLOV +35 HP',
         PickupKind.somsa => 'SOMSA +20 HP',
         PickupKind.coffee => 'COFFEE +50 ⚡',
+        PickupKind.note => 'LOST NOTE',
       };
 }
 

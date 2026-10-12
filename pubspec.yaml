@@ -12,6 +12,7 @@ dependencies:
   flame: ^1.18.0
   vibration: ^3.1.0
   shared_preferences: ^2.5.4
+  flame_audio: ^2.11.14
 
 dev_dependencies:
   flutter_test:
@@ -43,6 +44,15 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  # Pixel fonts (SIL Open Font License, see assets/fonts/OFL-*.txt)
+  fonts:
+    - family: PressStart2P
+      fonts:
+        - asset: assets/fonts/PressStart2P-Regular.ttf
+    - family: VT323
+      fonts:
+        - asset: assets/fonts/VT323-Regular.ttf
+
   # To add assets to your application, add an assets section, like this:
   assets:
     - assets/
@@ -56,6 +66,22 @@ flutter:
     - assets/Monsters_Creatures_Fantasy/Mushroom/
     - assets/Monsters_Creatures_Fantasy/Skeleton/
     - assets/Monsters_Creatures_Fantasy/Flying eye/
+    - assets/audio/
+    - assets/male_hero_free/individual_sheets/
+    - assets/Demon_sword/strips/
+    - assets/MainCharacter(FreePack)/
+    - assets/Forest_Monsters_FREE/Mushroom/Mushroom with VFX/
+    - assets/Nature Landscapes Free Pixel Art/nature_1/
+    - assets/Nature Landscapes Free Pixel Art/nature_2/
+    - assets/Nature Landscapes Free Pixel Art/nature_3/
+    - assets/Nature Landscapes Free Pixel Art/nature_4/
+    - assets/Nature Landscapes Free Pixel Art/nature_5/
+    - assets/Nature Landscapes Free Pixel Art/nature_6/
+    - assets/Nature Landscapes Free Pixel Art/nature_7/
+    - assets/Nature Landscapes Free Pixel Art/nature_8/
+    - assets/Xmas/
+    - assets/Icons Mix Mega Pack (4)/
+    - assets/pixel/
     # /splash_animation.json
     # - assets/welcome_animation.json
   #   - images/a_dot_ham.jpeg

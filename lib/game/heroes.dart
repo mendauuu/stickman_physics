@@ -1,11 +1,12 @@
 // lib/game/heroes.dart
-// Playable Millat Umidi students. More unlock as the student climbs higher.
+// Playable dreamers. Ozod is the hero of the story; more forms unlock as he
+// climbs higher through the Nightmare University.
 
 import 'package:flutter/material.dart' show Color;
 
 enum HeroAttack { melee, magic }
 
-enum HeroSpecial { wave, dash, nova, combo, iaido, frenzy }
+enum HeroSpecial { wave, dash, nova, combo, iaido, frenzy, blade }
 
 class Swing {
   final String anim;
@@ -74,7 +75,7 @@ const List<HeroDef> kHeroes = [
     ],
     special: HeroSpecial.wave,
     specialName: 'A+ Wave',
-    desc: '3-hit sword combo. Power: a golden A+ wave.',
+    desc: 'Balanced 3-hit sword combo. Power: a golden A+ wave.',
     color: Color(0xFFFFD54F),
   ),
   HeroDef(
@@ -144,7 +145,7 @@ const List<HeroDef> kHeroes = [
     reach: 32,
     special: HeroSpecial.iaido,
     specialName: 'Iaido Strike',
-    desc: 'Longest sword reach. Power: teleport behind the teacher and slash.',
+    desc: 'Longest sword reach. Power: teleport behind the boss and slash.',
     color: Color(0xFFFF5252),
     unlockFloor: 4,
   ),
@@ -160,8 +161,28 @@ const List<HeroDef> kHeroes = [
     reach: 22,
     special: HeroSpecial.frenzy,
     specialName: 'Goblin Frenzy',
-    desc: 'Graduate to unlock! Super fast. Power: frenzy — faster + heals on hit.',
+    desc: 'Wake up to unlock! Super fast. Power: frenzy — faster + heals on hit.',
     color: Color(0xFF8BC34A),
-    unlockFloor: 6, // after graduating (all 6 floors)
+    unlockFloor: 6, // after waking up (every boss, including the Grade Reaper)
+  ),
+  HeroDef(
+    name: 'Ozod',
+    title: 'First-year student',
+    emoji: '🦸',
+    body: 'Hero',
+    hp: 105,
+    speed: 72,
+    swings: [
+      Swing('Attack_1', 0.12, 9, 10),
+      Swing('Attack_2', 0.10, 12, 40),
+    ],
+    reach: 30,
+    special: HeroSpecial.blade,
+    specialName: 'Blade of Hope',
+    desc: 'The hero of the story. Power: a Blade of Hope that comes back. (Art: Ozzbit Games)',
+    color: Color(0xFF18FFFF),
   ),
 ];
+
+/// The story's hero, picked for new players.
+final int kOzod = kHeroes.indexWhere((h) => h.name == 'Ozod');

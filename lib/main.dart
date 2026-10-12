@@ -4,28 +4,43 @@ import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'game/audio.dart';
+import 'game/campus.dart';
 import 'game/heroes.dart';
+import 'game/minions.dart';
 import 'game/school_game.dart';
+import 'game/story.dart';
 import 'game/teachers.dart';
+import 'pixel/pixel_art.dart';
+import 'pixel/pixel_ui.dart';
 
 part 'menu_overlay.dart';
+part 'pause_overlay.dart';
+part 'rest_overlay.dart';
+part 'story_overlay.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await SystemChrome.setPreferredOrientations(
-      [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
+  await SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
   await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-  runApp(const ClassClashApp());
+  await PixelArt.load(); // icons and buttons are ready before the first frame
+  runApp(const ExamEscapeApp());
 }
 
-class ClassClashApp extends StatelessWidget {
-  const ClassClashApp({super.key});
+class ExamEscapeApp extends StatelessWidget {
+  const ExamEscapeApp({super.key});
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Class Clash',
+      title: 'Exam Escape',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData.dark(),
+      // Everything is pixel art: pixel fonts, no ripples, no rounded Material bits.
+      theme: ThemeData(
+        brightness: Brightness.dark,
+        fontFamily: kPixelFont,
+        splashFactory: NoSplash.splashFactory,
+        highlightColor: Colors.transparent,
+      ),
       home: const _GamePage(),
     );
   }
@@ -37,11 +52,56 @@ class _GamePage extends StatefulWidget {
   State<_GamePage> createState() => _GamePageState();
 }
 
-class _GamePageState extends State<_GamePage> {
+class _GamePageState extends State<_GamePage> with WidgetsBindingObserver {
   final _game = SchoolGame();
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// Switching apps or getting a call mid-fight pauses the game.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed && _game.inFight && !_game.isPaused) _game.pauseGame();
+  }
+
+  /// Android back button: pause/resume during a fight, back to the menu
+  /// from other screens, and only leave the app from the main menu.
+  void _onBack() {
+    final g = _game;
+    if (g.isPaused) {
+      g.resumeGame();
+    } else if (g.phase == Phase.story) {
+      g.endStory(); // skip the story
+    } else if (g.inFight) {
+      g.pauseGame();
+    } else if (g.phase == Phase.menu) {
+      SystemNavigator.pop();
+    } else {
+      g.toMenu();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _onBack();
+      },
+      child: _scaffold(),
+    );
+  }
+
+  Widget _scaffold() {
     return Scaffold(
       backgroundColor: Colors.black,
       body: GameWidget(
@@ -49,6 +109,8 @@ class _GamePageState extends State<_GamePage> {
         overlayBuilderMap: {
           'menu': (ctx, _) => _MenuOverlay(game: _game),
           'intro': (ctx, _) => _IntroOverlay(game: _game),
+          'story': (ctx, _) => _StoryOverlay(game: _game),
+          'rest': (ctx, _) => _RestOverlay(game: _game),
           'controls': (ctx, _) => _ControlsOverlay(game: _game),
           'pause': (ctx, _) => _PauseOverlay(game: _game),
           'gameOver': (ctx, _) => _GameOverOverlay(game: _game),
@@ -62,13 +124,12 @@ class _GamePageState extends State<_GamePage> {
 
 const _cyan = Color(0xFF00E5FF);
 const _gold = Color(0xFFFFD54F);
-const _panel = Color(0xEE111A2B);
+const _panel = Color(0xFF161D2A);
 
-String _fmtTime(double s) =>
-    '${s ~/ 60}:${(s % 60).floor().toString().padLeft(2, '0')}';
+String _fmtTime(double s) => '${s ~/ 60}:${(s % 60).floor().toString().padLeft(2, '0')}';
 
 // ═══════════════════════════════════════════════════════════════════════════
-// FLOOR INTRO — the teacher introduces themselves
+// ROOM INTRO — the boss introduces themselves (or the hall is described)
 // ═══════════════════════════════════════════════════════════════════════════
 class _IntroOverlay extends StatelessWidget {
   final SchoolGame game;
@@ -76,93 +137,120 @@ class _IntroOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final d = game.def;
+    final d = game.def, r = game.room;
+    final boss = r.isBoss;
+    final monsters = {for (final w in r.waves) ...w}.toList();
+    final b = r.buildingDef;
+    final abilities = d.twins.isNotEmpty
+        ? [...d.allAbilities, if (game.round > 1) ...d.finalAbilities]
+        : game.currentAbilities;
     return Container(
-      color: Colors.black.withValues(alpha: 0.45),
+      color: kInk.withValues(alpha: 0.5),
       child: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(12),
-            child: Container(
-              constraints: const BoxConstraints(maxWidth: 560),
-              padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
-              decoration: BoxDecoration(
+            padding: const EdgeInsets.all(10),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 600),
+              child: PixelPanel(
                 color: _panel,
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: d.accent, width: 2),
-                boxShadow: [BoxShadow(color: d.accent.withValues(alpha: 0.35), blurRadius: 24)],
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text('FLOOR ${d.floorLabel}  ·  ROUND ${game.round}/$kRoundsPerFloor ${game.roundName}',
-                      style: TextStyle(
-                          color: d.accent, fontSize: 12, letterSpacing: 3, fontWeight: FontWeight.w900)),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Text(d.emoji, style: const TextStyle(fontSize: 40)),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(d.name,
-                                style: const TextStyle(
-                                    color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900)),
-                            Text('${d.course}  ·  ${game.teacher.maxHp.round()} HP',
-                                style: const TextStyle(color: Colors.white60, fontSize: 11, letterSpacing: 1.5)),
-                          ],
-                        ),
+                accent: d.accent,
+                padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (r.number == 1 && game.round == 1)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: PText('${b.emoji}  FLOOR ${b.letter} · ${b.name.toUpperCase()}',
+                            textAlign: TextAlign.center, style: pixelStyle(12, b.color, spacing: 1)),
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.06),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Text('“${game.isFinalRound ? d.finalLine : d.intro}”',
-                        style: const TextStyle(
-                            color: Colors.white, fontSize: 14, fontStyle: FontStyle.italic, height: 1.35)),
-                  ),
-                  const SizedBox(height: 10),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text('SPECIAL ABILITIES',
-                        style: TextStyle(color: d.accent, fontSize: 10, letterSpacing: 2, fontWeight: FontWeight.w900)),
-                  ),
-                  const SizedBox(height: 6),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: [
-                      for (final a in game.currentAbilities)
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-                          decoration: BoxDecoration(
-                            color: d.accent.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: d.accent.withValues(alpha: 0.5)),
+                    PText('🕒 ${clockText(r.minutes)}  ·  ${timeLeftText(r.minutes).toUpperCase()}',
+                        style: pixelStyle(8, Colors.white54)),
+                    const SizedBox(height: 4),
+                    Text(
+                        boss
+                            ? 'ROOM ${r.label}  ·  ${game.rounds == 2 ? 'ROUND' : 'PHASE'} ${game.round}/${game.rounds} ${game.roundName}'
+                            : 'ROOM ${r.label}  ·  MONSTER HALL',
+                        textAlign: TextAlign.center,
+                        style: pixelStyle(9, d.accent)),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        PText(r.emoji, style: pixelStyle(26, Colors.white)),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              PText(boss ? d.name : r.name, style: pixelStyle(16, Colors.white)),
+                              const SizedBox(height: 3),
+                              Text(
+                                  boss
+                                      ? '${d.course}  ·  ${game.fearPhase ? 'cannot be hurt' : '${game.teacher.maxHp.round()} HP'}'
+                                      : '${b.name}  ·  ${r.waves.length} waves of monsters',
+                                  style: bodyStyle(16, Colors.white60, shadow: false)),
+                            ],
                           ),
-                          child: Text.rich(TextSpan(children: [
-                            TextSpan(
-                                text: kAbilityName[a],
-                                style: const TextStyle(
-                                    color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800)),
-                            TextSpan(
-                                text: '  ${kAbilityTip[a]}',
-                                style: const TextStyle(color: Colors.white60, fontSize: 10)),
-                          ])),
                         ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-                  _BigButton(label: 'FIGHT!', color: d.accent, onTap: game.beginFight, small: true),
-                ],
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(8),
+                      color: kInk.withValues(alpha: 0.6),
+                      child: PText(boss ? '“${d.lineFor(game.round)}”' : d.intro,
+                          style: bodyStyle(20, Colors.white, height: 1.05)),
+                    ),
+                    if (boss && game.fearPhase)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: PText(
+                            '🧍 Stop running. STAND STILL and he shrinks. Every Lost Note makes him shrink faster '
+                            '(${game.notesFound}/${kLostNotes.length}).',
+                            style: bodyStyle(17, const Color(0xFFFFF59D))),
+                      ),
+                    if (boss && d.twins.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: PText('⚖️ They take turns. Hit one, and the other gets stronger.',
+                            style: bodyStyle(17, const Color(0xFFFFE082))),
+                      ),
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(boss ? 'SPECIAL ABILITIES' : 'MONSTERS IN THIS HALL',
+                          style: pixelStyle(8, d.accent, spacing: 1)),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        for (final (name, tip) in boss
+                            ? [for (final a in abilities) (d.abilityName(a), d.abilityTip(a))]
+                            : [
+                                for (final m in monsters) ('${kMinions[m]!.emoji} ${kMinions[m]!.name}', kMinions[m]!.tip)
+                              ])
+                          Container(
+                            padding: const EdgeInsets.fromLTRB(6, 4, 6, 3),
+                            decoration: BoxDecoration(
+                              color: Color.lerp(_panel, d.accent, 0.14),
+                              border: Border(left: BorderSide(color: d.accent, width: kUiPx)),
+                            ),
+                            child: Text.rich(TextSpan(children: [
+                              TextSpan(text: pixelSafe(name), style: pixelStyle(8, Colors.white)),
+                              TextSpan(text: '  ${pixelSafe(tip)}', style: bodyStyle(15, Colors.white60, shadow: false)),
+                            ])),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    _BigButton(
+                        label: boss ? 'FIGHT!' : 'CLEAR THE HALL!', color: d.accent, onTap: game.beginFight, small: true),
+                  ],
+                ),
               ),
             ),
           ),
@@ -181,111 +269,109 @@ class _ControlsOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: Stack(
-        children: [
-          // Pause
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: Padding(
-                padding: const EdgeInsets.only(top: 52),
-                child: _TouchButton(
-                  size: 34,
-                  icon: Icons.pause,
-                  color: Colors.white,
-                  onDown: game.pauseGame,
-                ),
-              ),
-            ),
-          ),
-          // Movement
-          Positioned(
-            left: 16,
-            bottom: 14,
-            child: Row(children: [
-              _TouchButton(
-                icon: Icons.arrow_back_rounded,
-                color: Colors.white,
-                onDown: () => game.left = true,
-                onUp: () => game.left = false,
-              ),
-              const SizedBox(width: 14),
-              _TouchButton(
-                icon: Icons.arrow_forward_rounded,
-                color: Colors.white,
-                onDown: () => game.right = true,
-                onUp: () => game.right = false,
-              ),
-            ]),
-          ),
-          // Actions
-          Positioned(
-            right: 16,
-            bottom: 14,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                ValueListenableBuilder<double>(
-                  valueListenable: game.energy,
-                  builder: (_, e, __) => _TouchButton(
-                    size: 58,
-                    label: '⚡',
-                    color: e >= 100 ? _gold : Colors.white24,
-                    glow: e >= 100,
-                    progress: e / 100,
-                    onDown: game.pressSpecial,
+    return Stack(
+      children: [
+        // Pause — lines up with the canvas HUD, so it ignores the safe area.
+        Positioned(
+          top: 2,
+          left: 2,
+          child: _PauseButton(onTap: game.pauseGame),
+        ),
+        SafeArea(
+          child: Stack(
+            children: [
+              // Movement
+              Positioned(
+                left: 16,
+                bottom: 10,
+                child: Row(children: [
+                  _TouchButton(
+                    icon: 'ui_left',
+                    color: SquareColor.blue,
+                    onDown: () => game.left = true,
+                    onUp: () => game.left = false,
                   ),
-                ),
-                const SizedBox(width: 10),
-                _TouchButton(
-                  size: 54,
-                  icon: Icons.fast_forward_rounded,
-                  color: const Color(0xFF80D8FF),
-                  onDown: game.pressRoll,
-                ),
-                const SizedBox(width: 10),
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 46),
-                  child: _TouchButton(
-                    icon: Icons.keyboard_double_arrow_up_rounded,
-                    color: _cyan,
-                    onDown: game.pressJump,
+                  const SizedBox(width: 12),
+                  _TouchButton(
+                    icon: 'ui_right',
+                    color: SquareColor.blue,
+                    onDown: () => game.right = true,
+                    onUp: () => game.right = false,
                   ),
+                ]),
+              ),
+              // Actions
+              Positioned(
+                right: 16,
+                bottom: 10,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    ValueListenableBuilder<double>(
+                      valueListenable: game.energy,
+                      builder: (_, e, __) => _TouchButton(
+                        size: 50,
+                        icon: 'bolt',
+                        tint: false,
+                        color: e >= 100 ? SquareColor.orange : SquareColor.salmon,
+                        glow: e >= 100,
+                        progress: e / 100,
+                        onDown: game.pressSpecial,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    _TouchButton(
+                      size: 48,
+                      icon: 'ui_right',
+                      twice: true,
+                      color: SquareColor.blue,
+                      onDown: game.pressRoll,
+                    ),
+                    const SizedBox(width: 8),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 40),
+                      child: _TouchButton(
+                        icon: 'ui_up',
+                        color: SquareColor.green,
+                        onDown: game.pressJump,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    _TouchButton(
+                      size: 66,
+                      icon: 'sword',
+                      tint: false,
+                      color: SquareColor.red,
+                      onDown: game.pressAttack,
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 12),
-                _TouchButton(
-                  size: 78,
-                  label: '⚔',
-                  color: const Color(0xFFFF5252),
-                  onDown: game.pressAttack,
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
 
-/// Multi-touch friendly button: reacts on pointer down/up, not on tap.
+/// Multi-touch friendly pixel button: reacts on pointer down/up, not on tap.
 class _TouchButton extends StatefulWidget {
   final double size;
-  final IconData? icon;
-  final String? label;
-  final Color color;
+  final String icon;
+  final bool twice; // the icon drawn twice (roll)
+  final bool tint; // draw the icon in white
+  final SquareColor color;
   final bool glow;
   final double? progress;
   final VoidCallback onDown;
   final VoidCallback? onUp;
 
   const _TouchButton({
-    this.size = 64,
-    this.icon,
-    this.label,
+    this.size = 54,
+    required this.icon,
+    this.twice = false,
+    this.tint = true,
     required this.color,
     this.glow = false,
     this.progress,
@@ -323,80 +409,23 @@ class _TouchButtonState extends State<_TouchButton> {
   @override
   Widget build(BuildContext context) {
     final s = widget.size;
+    final glyph = widget.icon.startsWith('ui_');
+    final iconH = glyph ? s * 0.32 : s * 0.5;
+    final icon = PixelIcon(widget.icon, size: iconH, tint: widget.tint ? Colors.white : null);
     return Listener(
       behavior: HitTestBehavior.opaque,
       onPointerDown: (_) => _press(),
       onPointerUp: (_) => _release(),
       onPointerCancel: (_) => _release(),
-      child: AnimatedScale(
-        scale: _down ? 0.88 : 1,
-        duration: const Duration(milliseconds: 60),
-        child: SizedBox(
-          width: s,
-          height: s,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              if (widget.progress != null)
-                SizedBox(
-                  width: s,
-                  height: s,
-                  child: CircularProgressIndicator(
-                    value: widget.progress!.clamp(0.0, 1.0),
-                    strokeWidth: 4,
-                    color: _gold,
-                    backgroundColor: Colors.white10,
-                  ),
-                ),
-              Container(
-                width: s - 8,
-                height: s - 8,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: widget.color.withValues(alpha: _down ? 0.45 : 0.22),
-                  border: Border.all(color: widget.color.withValues(alpha: 0.8), width: 2),
-                  boxShadow: widget.glow
-                      ? [BoxShadow(color: widget.color.withValues(alpha: 0.7), blurRadius: 18)]
-                      : null,
-                ),
-                alignment: Alignment.center,
-                child: widget.icon != null
-                    ? Icon(widget.icon, color: Colors.white, size: s * 0.45)
-                    : Text(widget.label ?? '', style: TextStyle(fontSize: s * 0.38)),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// PAUSE
-// ═══════════════════════════════════════════════════════════════════════════
-class _PauseOverlay extends StatelessWidget {
-  final SchoolGame game;
-  const _PauseOverlay({required this.game});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      color: Colors.black.withValues(alpha: 0.7),
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('BREAK TIME ☕',
-                style: TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w900, letterSpacing: 3)),
-            const SizedBox(height: 20),
-            _BigButton(label: 'RESUME', color: _cyan, onTap: game.resumeGame, small: true),
-            const SizedBox(height: 10),
-            TextButton(
-              onPressed: game.toMenu,
-              child: const Text('QUIT TO MENU', style: TextStyle(color: Color(0xFF8ECAE6), letterSpacing: 2)),
-            ),
-          ],
+      child: Opacity(
+        opacity: 0.88,
+        child: PixelSquare(
+          size: s,
+          color: widget.color,
+          pressed: _down,
+          glow: widget.glow,
+          progress: widget.progress,
+          child: widget.twice ? Row(mainAxisSize: MainAxisSize.min, children: [icon, icon]) : icon,
         ),
       ),
     );
@@ -411,38 +440,40 @@ class _GameOverOverlay extends StatelessWidget {
   const _GameOverOverlay({required this.game});
 
   static const _lines = [
-    'Your parents will be notified.',
-    'See you at the retake exam.',
-    'Maybe try studying next time?',
-    'Detention for a week!',
-    'That was NOT on the syllabus.',
+    'The bell is still ringing…',
+    'Your name is written in pencil. For now.',
+    'Every student who sleeps comes to my school. Few wake up.',
+    'The clock is still ticking. Get up.',
+    'Mira is waiting for you. Try again.',
   ];
 
   @override
   Widget build(BuildContext context) {
-    final d = game.def;
     return Container(
-      color: Colors.black.withValues(alpha: 0.8),
+      color: kInk.withValues(alpha: 0.82),
       child: SafeArea(
         child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('📝  FAILED!',
-                  style: TextStyle(color: Color(0xFFFF5252), fontSize: 40, fontWeight: FontWeight.w900, letterSpacing: 4)),
-              const SizedBox(height: 6),
-              Text('${d.name} gave you an F in ${d.course}.',
-                  style: const TextStyle(color: Colors.white, fontSize: 15)),
-              Text(_lines[(game.hitsLanded + game.floor) % _lines.length],
-                  style: const TextStyle(color: Colors.white54, fontSize: 13, fontStyle: FontStyle.italic)),
-              const SizedBox(height: 22),
-              _BigButton(label: 'RETAKE FLOOR ${d.floorLabel}', color: _cyan, onTap: game.retryFloor, small: true),
-              const SizedBox(height: 8),
-              TextButton(
-                onPressed: game.toMenu,
-                child: const Text('MAIN MENU', style: TextStyle(color: Color(0xFF8ECAE6), letterSpacing: 2)),
-              ),
-            ],
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                PText('💤  STILL ASLEEP', style: pixelStyle(28, const Color(0xFFFF5252), spacing: 2)),
+                const SizedBox(height: 12),
+                PText(
+                    game.room.isBoss
+                        ? '${game.bossName} kept you in the dream.'
+                        : 'The nightmare swallowed ${game.room.name}.',
+                    textAlign: TextAlign.center,
+                    style: pixelStyle(11, Colors.white)),
+                const SizedBox(height: 6),
+                Text(_lines[(game.hitsLanded + game.floor) % _lines.length],
+                    textAlign: TextAlign.center, style: bodyStyle(20, Colors.white54, shadow: false)),
+                const SizedBox(height: 20),
+                _BigButton(label: 'TRY AGAIN ${game.room.label}', color: _cyan, onTap: game.retryFloor, small: true),
+                const SizedBox(height: 6),
+                PixelLink('MAIN MENU', onTap: game.toMenu),
+              ],
+            ),
           ),
         ),
       ),
@@ -451,63 +482,59 @@ class _GameOverOverlay extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// VICTORY — graduated!
+// VICTORY — Ozod wakes up at 8:59 AM
 // ═══════════════════════════════════════════════════════════════════════════
-class _VictoryOverlay extends StatefulWidget {
+class _VictoryOverlay extends StatelessWidget {
   final SchoolGame game;
   const _VictoryOverlay({required this.game});
-  @override
-  State<_VictoryOverlay> createState() => _VictoryOverlayState();
-}
-
-class _VictoryOverlayState extends State<_VictoryOverlay> with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl =
-      AnimationController(vsync: this, duration: const Duration(milliseconds: 900))..forward();
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
-    final g = widget.game;
+    final g = game;
     final isBest = g.bestTime != null && g.runTime <= g.bestTime!;
     return Container(
-      color: Colors.black.withValues(alpha: 0.85),
+      // After the walk out into the light, let the landscape show through.
+      color: kInk.withValues(alpha: g.escaping ? 0.55 : 0.85),
       child: SafeArea(
         child: Center(
-          child: ScaleTransition(
-            scale: CurvedAnimation(parent: _ctrl, curve: Curves.elasticOut),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text('🎓', style: TextStyle(fontSize: 56)),
-                  const Text('YOU GRADUATED!',
-                      style: TextStyle(color: _gold, fontSize: 38, fontWeight: FontWeight.w900, letterSpacing: 4)),
-                  const Text('Millat Umidi University is proud of you.',
-                      style: TextStyle(color: Colors.white70, fontSize: 14)),
-                  const SizedBox(height: 16),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _stat('TIME', _fmtTime(g.runTime), isBest ? '🏆 BEST' : null),
-                      _stat('HITS', '${g.hitsLanded}', null),
-                      _stat('RETAKES', '${g.retries}', g.retries == 0 ? 'PERFECT' : null),
-                      _stat('COMBO', '${g.maxCombo}', g.maxCombo >= 20 ? 'LEGEND' : null),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  _BigButton(label: 'PLAY AGAIN', color: _cyan, onTap: g.startRun, small: true),
-                  const SizedBox(height: 8),
-                  TextButton(
-                    onPressed: g.toMenu,
-                    child: const Text('MAIN MENU', style: TextStyle(color: Color(0xFF8ECAE6), letterSpacing: 2)),
-                  ),
-                ],
-              ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Row(mainAxisSize: MainAxisSize.min, children: [
+                  PixelIcon('sun', size: 40),
+                  SizedBox(width: 14),
+                  PixelIcon('clock', size: 44),
+                  SizedBox(width: 14),
+                  PixelIcon('sparkle', size: 34),
+                ]),
+                const SizedBox(height: 10),
+                Text('YOU WOKE UP!', style: pixelStyle(30, _gold, spacing: 2)),
+                const SizedBox(height: 10),
+                Text('8:59 AM. You reached the Exam Hall just as the doors closed — and you remember everything.',
+                    textAlign: TextAlign.center, style: bodyStyle(20, Colors.white70)),
+                PText('📄 Lost Notes found: ${g.notesFound}/${kLostNotes.length}  ·  👻 Mira woke up too.',
+                    textAlign: TextAlign.center, style: bodyStyle(19, const Color(0xFFB2EBF2))),
+                const SizedBox(height: 4),
+                PText(kPostCredit,
+                    textAlign: TextAlign.center, style: bodyStyle(17, const Color(0xFFFF8A80), shadow: false)),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _stat('TIME', _fmtTime(g.runTime), isBest ? '🏆 BEST' : null),
+                    _stat('HITS', '${g.hitsLanded}', null),
+                    _stat('RETRIES', '${g.retries}', g.retries == 0 ? 'PERFECT' : null),
+                    _stat('COMBO', '${g.maxCombo}', g.maxCombo >= 20 ? 'LEGEND' : null),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                _BigButton(label: 'PLAY AGAIN', color: _cyan, onTap: g.startRun, small: true),
+                PixelLink('MAIN MENU', onTap: g.toMenu),
+                Text('Icons: BlackSkull-k · Xmas: 0-mem0ry · Hero art: Ozzbit Games',
+                    style: bodyStyle(14, Colors.white30, shadow: false)),
+              ],
             ),
           ),
         ),
@@ -516,20 +543,23 @@ class _VictoryOverlayState extends State<_VictoryOverlay> with SingleTickerProvi
   }
 
   Widget _stat(String label, String value, String? badge) {
-    return Container(
-      width: 96,
-      margin: const EdgeInsets.symmetric(horizontal: 5),
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      decoration: BoxDecoration(
-        color: _panel,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: badge != null ? _gold : Colors.white12, width: 1.5),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: SizedBox(
+        width: 104,
+        child: PixelPanel(
+          color: _panel,
+          accent: badge != null ? _gold : const Color(0xFF3A4458),
+          px: 2,
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Column(children: [
+            Text(label, style: pixelStyle(8, const Color(0xFF8ECAE6))),
+            const SizedBox(height: 4),
+            Text(value, style: pixelStyle(16, Colors.white)),
+            if (badge != null) ...[const SizedBox(height: 3), PText(badge, style: pixelStyle(7, _gold))],
+          ]),
+        ),
       ),
-      child: Column(children: [
-        Text(label, style: const TextStyle(color: Color(0xFF8ECAE6), fontSize: 11, letterSpacing: 2)),
-        Text(value, style: const TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w900)),
-        if (badge != null) Text(badge, style: const TextStyle(color: _gold, fontSize: 10, fontWeight: FontWeight.w800)),
-      ]),
     );
   }
 }
@@ -546,29 +576,15 @@ class _BigButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Dark text on light buttons (gold, green) so the label stays readable.
-    final light = color.computeLuminance() > 0.45;
-    final text = Text(label,
-        maxLines: 1,
-        style: TextStyle(
-            color: light ? const Color(0xFF111111) : Colors.white,
-            fontSize: small ? 18 : 24,
-            fontWeight: FontWeight.w900,
-            letterSpacing: 4,
-            shadows: light ? null : const [Shadow(color: Colors.black45, blurRadius: 4)]));
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: wide ? double.infinity : null,
-        alignment: wide ? Alignment.center : null,
-        padding: EdgeInsets.symmetric(horizontal: wide ? 20 : (small ? 40 : 56), vertical: small ? 12 : 16),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(colors: [color, Color.lerp(color, Colors.black, 0.35)!]),
-          borderRadius: BorderRadius.circular(40),
-          boxShadow: [BoxShadow(color: color.withValues(alpha: 0.45), blurRadius: 22, spreadRadius: 1)],
-        ),
-        child: wide ? FittedBox(fit: BoxFit.scaleDown, child: text) : text,
-      ),
+    return PixelButton(
+      label: label,
+      color: color,
+      small: small,
+      wide: wide,
+      onTap: () {
+        GameAudio.instance.play('click');
+        onTap();
+      },
     );
   }
 }
