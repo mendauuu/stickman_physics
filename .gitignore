@@ -17,6 +17,7 @@ android/key.properties
 build/
 
 # Android build files and machine-specific config
+.gradle/
 android/.gradle/
 android/.kotlin/
 android/app/build/
@@ -43,3 +44,7 @@ ios/.symlinks/
 .DS_Store
 Thumbs.db
 *.log
+
+# Built app packages
+*.apk
+*.aab
