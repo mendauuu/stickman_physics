@@ -10,7 +10,7 @@
     <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
-        android:label="Class Clash"
+        android:label="Exam Escape: Pixel Brawler"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
 

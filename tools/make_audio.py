@@ -1,4 +1,4 @@
-"""Generates every sound effect and music loop for Class Clash.
+"""Generates every sound effect and music loop for Exam Escape: Pixel Brawler.
 
 All audio is synthesised here (retro chiptune style), so it is 100% original
 and free of licensing questions. Re-run after editing to regenerate:

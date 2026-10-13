@@ -32,7 +32,7 @@ class ExamEscapeApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Exam Escape',
+      title: 'Exam Escape: Pixel Brawler',
       debugShowCheckedModeBanner: false,
       // Everything is pixel art: pixel fonts, no ripples, no rounded Material bits.
       theme: ThemeData(

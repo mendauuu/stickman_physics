@@ -1,4 +1,4 @@
-"""Builds the Google Play store graphics for Class Clash.
+"""Builds the Google Play store graphics for Exam Escape: Pixel Brawler.
 
 Run from the project root:  python tools/make_store_assets.py
 Writes everything into store/.
@@ -71,10 +71,10 @@ def pixel_text(text, px, bands, scale, font=FONT, outline=INK, shadow=(0, 0, 0, 
 
 
 def logo(scale=8):
-    """CLASS / CLASH stacked, with a sword-slash underline."""
-    top = pixel_text('CLASS', 22, CYAN, scale)
-    bottom = pixel_text('CLASH', 22, GOLD, scale)
-    tag = pixel_text('CAMPUS BRAWLER', 11, [(255, 255, 255), (235, 240, 255), (200, 212, 240)], scale, spacing=2)
+    """EXAM / ESCAPE stacked, with a sword-slash underline."""
+    top = pixel_text('EXAM', 22, CYAN, scale)
+    bottom = pixel_text('ESCAPE', 22, GOLD, scale)
+    tag = pixel_text('PIXEL BRAWLER', 11, [(255, 255, 255), (235, 240, 255), (200, 212, 240)], scale, spacing=2)
     w = max(top.width, bottom.width, tag.width)
     gap = -3 * scale
     h = top.height + bottom.height + tag.height + gap
@@ -87,9 +87,9 @@ def logo(scale=8):
 
 def logo_wide(scale=6):
     """One-line logo for wide banners."""
-    t = pixel_text('CLASS', 22, CYAN, scale)
-    c = pixel_text('CLASH', 22, GOLD, scale)
-    tag = pixel_text('CAMPUS BRAWLER', 11, [(255, 255, 255), (235, 240, 255), (200, 212, 240)], scale, spacing=2)
+    t = pixel_text('EXAM', 22, CYAN, scale)
+    c = pixel_text('ESCAPE', 22, GOLD, scale)
+    tag = pixel_text('PIXEL BRAWLER', 11, [(255, 255, 255), (235, 240, 255), (200, 212, 240)], scale, spacing=2)
     gap = 2 * scale
     w = t.width + gap + c.width
     h = t.height + tag.height - scale * 2

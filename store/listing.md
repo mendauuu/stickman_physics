@@ -1,11 +1,11 @@
-# Class Clash: Google Play store listing
+# Exam Escape: Pixel Brawler — Google Play store listing
 
 Paste each block into Play Console → Grow users → Store presence → Main store listing.
 
 ## App name (max 30)
 
 ```
-Class Clash: Campus Brawler
+Exam Escape: Pixel Brawler
 ```
 
 ## Short description (max 80)
@@ -19,7 +19,7 @@ Battle monsters and boss teachers, then escape campus into a pixel-art world!
 ```
 Exams are monsters now. Literally.
 
-Class Clash is a fast pixel-art brawler set on a university campus that has been overrun by homework goblins, deadline mushrooms and teachers with very real superpowers. Fight your way through three buildings, survive every final exam, and walk out of the last door into a world that is finally yours to explore.
+Exam Escape: Pixel Brawler is a fast pixel-art brawler set on a university campus that has been overrun by homework goblins, deadline mushrooms and teachers with very real superpowers. Fight your way through three buildings, survive every final exam, and walk out of the last door into a world that is finally yours to explore.
 
 ⚔️ FIGHT ROOM BY ROOM
 Clear monster halls wave by wave, beat each teacher in a two-round boss fight (Midterm, then the Final Exam), and grab a breather at rest stops. 18 rooms across Building B, Building C and the Main Building, each with its own look, mood and music.
