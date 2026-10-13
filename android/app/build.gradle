@@ -33,8 +33,8 @@ android {
         applicationId "com.gravitystickman.stickman_physics"
         minSdkVersion flutter.minSdkVersion
         targetSdkVersion flutter.targetSdkVersion
-        versionCode 14       // increment this by 1 every time you upload
-        versionName "1.0.14" // your app version shown in Play Store
+        versionCode 15       // increment this by 1 every time you upload
+        versionName "1.0.15" // your app version shown in Play Store
     }
 
     signingConfigs {
